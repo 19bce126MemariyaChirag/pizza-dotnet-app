@@ -11,12 +11,12 @@ public class PizzaTest
 
         var result = pizzaService.GetAll();
 
-        bool flag;
+        // bool flag;
 
-        if(result != null)
-            flag = true;
-        else
-            flag = false;
+        // if(result != null)
+        //     flag = true;
+        // else
+        //     flag = false;
 
         //Assert.True(flag,"flag");
         int count = result.Count();
