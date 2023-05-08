@@ -1,0 +1,101 @@
+default:
+  image:
+    name: mcr.microsoft.com/dotnet/sdk:6.0
+
+
+stages:          # List of stages for jobs, and their order of execution
+  - build
+  - test
+  - publish
+  - image-build
+  - deploy-aws
+  - executes
+  - deploy
+
+build-job:       # This job runs in the build stage, which runs first.
+  stage: build
+  before_script:
+    - dotnet nuget add source /builds/sharan.phadke/pizza-rest-api/nuget/packages/ -n local-packages
+    - dotnet nuget disable source nuget.org
+  script:
+    - echo "Building WebApp... "
+    - dotnet build
+    - echo "Build complete."
+
+unit-test-job:   # This job runs in the test stage.
+  stage: test    # It only starts when the job in the build stage completes successfully.
+  before_script:
+    - dotnet nuget add source /builds/sharan.phadke/pizza-rest-api/nuget/packages/ -n local-packages
+    - dotnet nuget disable source nuget.org
+  script:
+    - echo "Running unit tests..."
+    - dotnet test
+    - echo "Unit test Completed"
+
+publish-job:
+  stage: publish
+  before_script:
+    - dotnet nuget add source /builds/sharan.phadke/pizza-rest-api/nuget/packages/ -n local-packages
+    - dotnet nuget disable source nuget.org
+  script:
+    - echo "Publishing Package ..."
+    - dotnet publish -o out
+    - echo "Packaging finished ..."
+
+  artifacts: 
+    paths:
+      - out
+
+build-image-job:      # This job runs in the deploy stage.
+  stage: image-build  # It only runs when *both* jobs in the test stage complete successfully.
+  image: docker
+  variables:
+    DOCKER_HOST: "tcp://thedockerhost:2375/" 
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: "" 
+    DOCKER_DIND_IMAGE: "phadkesharanmatrixcomsec/docker:dind-with-ca"
+    IMAGE_NAME: "phadkesharanmatrixcomsec/pizza-rest-api"
+    IMAGE_TAG: "1.0"
+    CONTAINER_NAME: "pizza-restapi-container"
+    BASE_IMAGE : "mcr.microsoft.com/dotnet/sdk:6.0"
+
+    DOCKERHUB_USERNAME: "phadkesharanmatrixcomsec"
+    DOCKERHUB_PASSWORD: "Sh@120101"
+   
+  services:
+    - name: $DOCKER_DIND_IMAGE
+      alias: thedockerhost
+
+  script:
+    - cp ./Dockerfile ./out/Dockerfile
+    - cd out
+    - echo "Building Docker Image"
+    - docker build -t $IMAGE_NAME:$IMAGE_TAG .
+    - docker login -u $DOCKERHUB_USERNAME -p $DOCKERHUB_PASSWORD
+    - docker push $IMAGE_NAME:$IMAGE_TAG
+    - echo "Docker Image Build Successfull"
+
+
+deploy-aws-job:
+  stage: deploy-aws
+  image: kroniak/ssh-client
+
+  script:
+    - cd AWS-credentials/
+    - chmod 600 dotnet-project.pem
+    - ssh -i "dotnet-project.pem" -o StrictHostKeyChecking=no  ubuntu@ec2-3-141-167-38.us-east-2.compute.amazonaws.com 'sudo docker kill $(sudo docker ps -q) ; sudo docker system prune -f ; sudo docker pull phadkesharanmatrixcomsec/pizza-rest-api:1.0  ; sudo docker run -dp 8000:80 --privileged phadkesharanmatrixcomsec/pizza-rest-api:1.0'
+    - echo "Server Running on http://ec2-3-141-167-38.us-east-2.compute.amazonaws.com:8000/"
+
+.execute-job:
+  stage: execute
+  script:
+    - cd out/
+    - dotnet PizzaApi.dll
+
+.deploy-job:      # This job runs in the deploy stage.
+  stage: deploy  # It only runs when *both* jobs in the test stage complete successfully.
+  script:
+    - echo "Deploying application..."
+    - cd PizzaApi/
+    - dotnet run
+    - echo "Application Deployed Successfully!!"
